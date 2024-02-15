@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.002.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "blocklist", "blocklist.csproj", "{F771171F-AB12-40A0-9847-0A3AE0E26060}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{F771171F-AB12-40A0-9847-0A3AE0E26060}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F771171F-AB12-40A0-9847-0A3AE0E26060}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F771171F-AB12-40A0-9847-0A3AE0E26060}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F771171F-AB12-40A0-9847-0A3AE0E26060}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {E97718D2-6C1A-4973-BFAA-7E34639F9517}
+	EndGlobalSection
+EndGlobal
