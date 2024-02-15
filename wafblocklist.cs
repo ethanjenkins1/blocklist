@@ -69,6 +69,7 @@ public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
             var requestUri = $"https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Network/frontdoorwebapplicationfirewallpolicies/{wafPolicyName}?api-version=2020-05-01";
             var policy = new
             {
+                location = "Global",
                 properties = new
                 {
                     customRules = new
