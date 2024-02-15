@@ -9,15 +9,13 @@ using Newtonsoft.Json;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using Azure.Identity;
-using Azure.Core;
 
 public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
 {
-    private static HttpClient httpClient = new HttpClient();
-    private static string subscriptionId = Environment.GetEnvironmentVariable("AZURE_SUBSCRIPTION_ID");
-    private static string resourceGroupName = Environment.GetEnvironmentVariable("AZURE_RESOURCE_GROUP_NAME");
-    private static string frontDoorName = Environment.GetEnvironmentVariable("FRONT_DOOR_NAME");
-    private static string wafPolicyName = Environment.GetEnvironmentVariable("WAF_POLICY_NAME");
+    private static readonly HttpClient httpClient = new HttpClient();
+    private static readonly string subscriptionId = Environment.GetEnvironmentVariable("AZURE_SUBSCRIPTION_ID");
+    private static readonly string resourceGroupName = Environment.GetEnvironmentVariable("AZURE_RESOURCE_GROUP_NAME");
+    private static readonly string policyName = Environment.GetEnvironmentVariable("WAF_POLICY_NAME"); // Assuming WAF_POLICY_NAME is the policy name
 
     [Function("ProcessIPBlocklistAndUpdateFrontDoorWaf")]
     public static async Task Run([TimerTrigger("0 */5 * * * *")] TimerInfo myTimer, FunctionContext context)
@@ -36,7 +34,7 @@ public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
         {
             try
             {
-                string response = await httpClient.GetStringAsync(url);
+                var response = await httpClient.GetStringAsync(url);
                 var ips = ParseIPs(response);
                 allIps.AddRange(ips);
                 logger.LogInformation($"Fetched and parsed {ips.Count} IPs from {url}");
@@ -55,65 +53,60 @@ public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
 
     private static List<string> ParseIPs(string data)
     {
-        string ipPattern = @"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(\/\d{1,2})?\b";
+        var ipPattern = @"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(\/\d{1,2})?\b";
         return Regex.Matches(data, ipPattern).Select(m => m.Value).Distinct().ToList();
     }
 
     private static async Task UpdateFrontDoorWafPolicy(List<string> ips, ILogger logger)
     {
-        try
-        {
-            var token = await GetAzureRestApiToken();
-            httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var token = await GetAzureRestApiToken();
+        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-            var requestUri = $"https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Network/frontdoorwebapplicationfirewallpolicies/{wafPolicyName}?api-version=2020-05-01";
-            var policy = new
+        var requestUri = $"https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Cdn/cdnWebApplicationFirewallPolicies/{policyName}?api-version=2023-05-01";
+
+        var policyUpdate = new
+        {
+            tags = new { Updated = DateTime.UtcNow.ToString("s") + "Z" }, // Example of updating tags, adapt as necessary
+            properties = new
             {
-                location = "Global",
-                properties = new
+                customRules = new
                 {
-                    customRules = new
+                    rules = new[]
                     {
-                        rules = new[]
+                        new
                         {
-                            new
+                            name = "blocklist",
+                            priority = 1,
+                            action = "Block",
+                            matchConditions = new[]
                             {
-                                name = "blocklist",
-                                priority = 1,
-                                ruleType = "MatchRule",
-                                action = "Block",
-                                matchConditions = new[]
+                                new
                                 {
-                                    new
-                                    {
-                                        matchVariable = "RemoteAddr",
-                                        operatorProperty = "IPMatch",
-                                        negationConditon = false,
-                                        matchValues = ips.ToArray()
-                                    }
+                                    matchVariable = "RemoteAddr",
+                                    operatorProperty = "IPMatch",
+                                    negationConditon = false,
+                                    matchValues = ips.ToArray()
                                 }
                             }
                         }
                     }
                 }
-            };
-
-            var content = new StringContent(JsonConvert.SerializeObject(policy), System.Text.Encoding.UTF8, "application/json");
-            var response = await httpClient.PutAsync(requestUri, content);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                var error = await response.Content.ReadAsStringAsync();
-                logger.LogError($"Failed to update Front Door WAF policy: {error}");
             }
-            else
-            {
-                logger.LogInformation("Successfully updated Front Door WAF policy.");
-            }
-        }
-        catch (Exception ex)
+        };
+
+        var jsonContent = JsonConvert.SerializeObject(policyUpdate);
+        var content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
+
+        var response = await httpClient.PatchAsync(requestUri, content);
+
+        if (!response.IsSuccessStatusCode)
         {
-            logger.LogError($"Exception occurred while updating Front Door WAF policy: {ex.Message}");
+            var error = await response.Content.ReadAsStringAsync();
+            logger.LogError($"Failed to update Front Door WAF policy: {error}");
+        }
+        else
+        {
+            logger.LogInformation("Successfully updated Front Door WAF policy.");
         }
     }
 
