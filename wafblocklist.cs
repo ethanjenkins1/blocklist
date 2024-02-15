@@ -112,9 +112,10 @@ public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
 
     private static async Task<string> GetAzureRestApiToken()
     {
-        var context = new DefaultAzureCredential();
+        var credential = new DefaultAzureCredential();
         var tokenRequestContext = new TokenRequestContext(new[] { "https://management.azure.com/.default" });
-        var accessToken = await context.GetTokenAsync(tokenRequestContext);
+        var accessToken = await credential.GetTokenAsync(tokenRequestContext);
         return accessToken.Token;
     }
+
 }
