@@ -9,6 +9,7 @@ using Newtonsoft.Json;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using Azure.Identity;
+using Azure.Core;
 
 public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
 {
@@ -21,23 +22,57 @@ public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
     public static async Task Run([TimerTrigger("0 */5 * * * *")] TimerInfo myTimer, FunctionContext context)
     {
         var logger = context.GetLogger("ProcessIPBlocklistAndUpdateFrontDoorWaf");
-        logger.LogInformation($"Function triggered at: {DateTime.Now}");
+        var urls = new List<string>
+        {
+            "https://www.spamhaus.org/drop/edrop.txt",
+            "https://check.torproject.org/exit-addresses",
+            "https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt"
+        };
 
-        // Directly using a specified IP address for the example
-        await UpdateFrontDoorWafPolicy(logger);
+        var allIps = await FetchIPsFromUrls(urls, logger);
+
+        if (allIps.Any())
+        {
+            await UpdateFrontDoorWafPolicy(allIps, logger);
+        }
     }
 
-    private static async Task UpdateFrontDoorWafPolicy(ILogger logger)
+    private static async Task<List<string>> FetchIPsFromUrls(IEnumerable<string> urls, ILogger logger)
+    {
+        var allIps = new List<string>();
+        foreach (var url in urls)
+        {
+            try
+            {
+                var response = await httpClient.GetStringAsync(url);
+                var ips = ParseIPs(response);
+                allIps.AddRange(ips);
+                logger.LogInformation($"Fetched and parsed {ips.Count} IPs from {url}");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError($"Error fetching or parsing data from {url}: {ex.Message}");
+            }
+        }
+        return allIps;
+    }
+
+    private static List<string> ParseIPs(string data)
+    {
+        var ipPattern = @"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(\/\d{1,2})?\b";
+        return Regex.Matches(data, ipPattern).Select(m => m.Value).Distinct().ToList();
+    }
+
+    private static async Task UpdateFrontDoorWafPolicy(List<string> ips, ILogger logger)
     {
         var tokenCredential = new DefaultAzureCredential();
         httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await GetAzureRestApiToken(tokenCredential));
 
-        string[] specifiedIP = { "104.129.55.106" }; // Manually set IP
-
-        var requestUri = $"https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Network/frontDoorWebApplicationFirewallPolicies/{policyName}?api-version=2022-05-01";
+        var requestUri = $"https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Network/frontdoorwebapplicationfirewallpolicies/{policyName}?api-version=2023-05-01";
 
         var policyUpdate = new
         {
+            tags = new { Updated = DateTime.UtcNow.ToString("s") + "Z" },
             properties = new
             {
                 customRules = new
@@ -55,8 +90,8 @@ public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
                                 {
                                     matchVariable = "RemoteAddr",
                                     operatorProperty = "IPMatch",
-                                    negationCondition = false,
-                                    matchValues = specifiedIP
+                                    negationConditon = false,
+                                    matchValues = ips.ToArray()
                                 }
                             }
                         }
@@ -77,14 +112,14 @@ public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
         }
         else
         {
-            logger.LogInformation("Successfully updated Front Door WAF policy with the specified IP.");
+            logger.LogInformation("Successfully updated Front Door WAF policy.");
         }
     }
 
     private static async Task<string> GetAzureRestApiToken(TokenCredential tokenCredential)
     {
         var requestContext = new TokenRequestContext(new[] { "https://management.azure.com/.default" });
-        var accessToken = await tokenCredential.GetTokenAsync(requestContext);
+        var accessToken = await tokenCredential.GetTokenAsync(requestContext, new CancellationToken());
         return accessToken.Token;
     }
 }
