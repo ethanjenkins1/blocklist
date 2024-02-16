@@ -78,6 +78,7 @@ namespace MyFunctionApp
 
             var policyUpdate = new
             {
+                tags = new Dictionary<string, string>(), // Assuming no tags are needed, otherwise fill this dictionary appropriately
                 properties = new
                 {
                     customRules = new
@@ -105,7 +106,7 @@ namespace MyFunctionApp
                 }
             };
 
-            var jsonContent = JsonSerializer.Serialize(policyUpdate);
+            var jsonContent = JsonSerializer.Serialize(policyUpdate, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
             var content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
 
             // Acquire a token for the Azure Management scope
