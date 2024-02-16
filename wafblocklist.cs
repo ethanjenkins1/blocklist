@@ -63,10 +63,13 @@ public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
         return Regex.Matches(data, ipPattern).Select(m => m.Value).Distinct().ToList();
     }
 
-    private static async Task UpdateFrontDoorWafPolicy(List<string> ips, ILogger logger)
+private static async Task UpdateFrontDoorWafPolicy(ILogger logger)
 {
     var tokenCredential = new DefaultAzureCredential();
     httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await GetAzureRestApiToken(tokenCredential));
+
+    // Specify the IP address directly
+    string[] ips = { "104.129.55.106" };
 
     // Updated API version to 2022-05-01 and corrected the resource URI
     var requestUri = $"https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Network/frontDoorWebApplicationFirewallPolicies/{policyName}?api-version=2022-05-01";
@@ -91,7 +94,7 @@ public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
                                 matchVariable = "RemoteAddr",
                                 operatorProperty = "IPMatch",
                                 negationCondition = false,
-                                matchValues = ips.ToArray()
+                                matchValues = ips
                             }
                         }
                     }
@@ -112,7 +115,7 @@ public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
     }
     else
     {
-        logger.LogInformation("Successfully updated Front Door WAF policy.");
+        logger.LogInformation("Successfully updated Front Door WAF policy with the specified IP.");
     }
 }
     private static async Task<string> GetAzureRestApiToken(TokenCredential tokenCredential)
