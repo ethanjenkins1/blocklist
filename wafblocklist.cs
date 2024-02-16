@@ -64,58 +64,57 @@ public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
     }
 
     private static async Task UpdateFrontDoorWafPolicy(List<string> ips, ILogger logger)
+{
+    var tokenCredential = new DefaultAzureCredential();
+    httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await GetAzureRestApiToken(tokenCredential));
+
+    // Updated API version to 2022-05-01 and corrected the resource URI
+    var requestUri = $"https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Network/frontDoorWebApplicationFirewallPolicies/{policyName}?api-version=2022-05-01";
+
+    var policyUpdate = new
     {
-        var tokenCredential = new DefaultAzureCredential();
-        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await GetAzureRestApiToken(tokenCredential));
-
-        var requestUri = $"https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Network/frontdoorwebapplicationfirewallpolicies/{policyName}?api-version=2023-05-01";
-
-        var policyUpdate = new
+        properties = new
         {
-            tags = new { Updated = DateTime.UtcNow.ToString("s") + "Z" },
-            properties = new
+            customRules = new
             {
-                customRules = new
+                rules = new[]
                 {
-                    rules = new[]
+                    new
                     {
-                        new
+                        name = "blocklist",
+                        priority = 1,
+                        action = "Block",
+                        matchConditions = new[]
                         {
-                            name = "blocklist",
-                            priority = 1,
-                            action = "Block",
-                            matchConditions = new[]
+                            new
                             {
-                                new
-                                {
-                                    matchVariable = "RemoteAddr",
-                                    operatorProperty = "IPMatch",
-                                    negationConditon = false,
-                                    matchValues = ips.ToArray()
-                                }
+                                matchVariable = "RemoteAddr",
+                                operatorProperty = "IPMatch",
+                                negationCondition = false,
+                                matchValues = ips.ToArray()
                             }
                         }
                     }
                 }
             }
-        };
-
-        var jsonContent = JsonConvert.SerializeObject(policyUpdate);
-        var content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
-
-        var response = await httpClient.PatchAsync(requestUri, content);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var error = await response.Content.ReadAsStringAsync();
-            logger.LogError($"Failed to update Front Door WAF policy: {error}");
         }
-        else
-        {
-            logger.LogInformation("Successfully updated Front Door WAF policy.");
-        }
+    };
+
+    var jsonContent = JsonConvert.SerializeObject(policyUpdate);
+    var content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
+
+    var response = await httpClient.PatchAsync(requestUri, content);
+
+    if (!response.IsSuccessStatusCode)
+    {
+        var error = await response.Content.ReadAsStringAsync();
+        logger.LogError($"Failed to update Front Door WAF policy: {error}");
     }
-
+    else
+    {
+        logger.LogInformation("Successfully updated Front Door WAF policy.");
+    }
+}
     private static async Task<string> GetAzureRestApiToken(TokenCredential tokenCredential)
     {
         var requestContext = new TokenRequestContext(new[] { "https://management.azure.com/.default" });
