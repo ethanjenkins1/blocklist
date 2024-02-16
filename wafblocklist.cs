@@ -9,13 +9,14 @@ using Newtonsoft.Json;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using Azure.Identity;
+using Azure.Core;
 
 public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
 {
     private static readonly HttpClient httpClient = new HttpClient();
-    private static readonly string subscriptionId = Environment.GetEnvironmentVariable("AZURE_SUBSCRIPTION_ID");
-    private static readonly string resourceGroupName = Environment.GetEnvironmentVariable("AZURE_RESOURCE_GROUP_NAME");
-    private static readonly string policyName = Environment.GetEnvironmentVariable("WAF_POLICY_NAME"); // Assuming WAF_POLICY_NAME is the policy name
+    private static readonly string subscriptionId = Environment.GetEnvironmentVariable("AZURE_SUBSCRIPTION_ID") ?? throw new InvalidOperationException("Environment variable AZURE_SUBSCRIPTION_ID not set.");
+    private static readonly string resourceGroupName = Environment.GetEnvironmentVariable("AZURE_RESOURCE_GROUP_NAME") ?? throw new InvalidOperationException("Environment variable AZURE_RESOURCE_GROUP_NAME not set.");
+    private static readonly string policyName = Environment.GetEnvironmentVariable("WAF_POLICY_NAME") ?? throw new InvalidOperationException("Environment variable WAF_POLICY_NAME not set.");
 
     [Function("ProcessIPBlocklistAndUpdateFrontDoorWaf")]
     public static async Task Run([TimerTrigger("0 */5 * * * *")] TimerInfo myTimer, FunctionContext context)
@@ -28,8 +29,17 @@ public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
             "https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt"
         };
 
-        var allIps = new List<string>();
+        var allIps = await FetchIPsFromUrls(urls, logger);
 
+        if (allIps.Any())
+        {
+            await UpdateFrontDoorWafPolicy(allIps, logger);
+        }
+    }
+
+    private static async Task<List<string>> FetchIPsFromUrls(IEnumerable<string> urls, ILogger logger)
+    {
+        var allIps = new List<string>();
         foreach (var url in urls)
         {
             try
@@ -44,11 +54,7 @@ public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
                 logger.LogError($"Error fetching or parsing data from {url}: {ex.Message}");
             }
         }
-
-        if (allIps.Any())
-        {
-            await UpdateFrontDoorWafPolicy(allIps, logger);
-        }
+        return allIps;
     }
 
     private static List<string> ParseIPs(string data)
@@ -59,14 +65,14 @@ public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
 
     private static async Task UpdateFrontDoorWafPolicy(List<string> ips, ILogger logger)
     {
-        var token = await GetAzureRestApiToken();
-        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var tokenCredential = new DefaultAzureCredential();
+        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await GetAzureRestApiToken(tokenCredential));
 
         var requestUri = $"https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Cdn/cdnWebApplicationFirewallPolicies/{policyName}?api-version=2023-05-01";
 
         var policyUpdate = new
         {
-            tags = new { Updated = DateTime.UtcNow.ToString("s") + "Z" }, // Example of updating tags, adapt as necessary
+            tags = new { Updated = DateTime.UtcNow.ToString("s") + "Z" },
             properties = new
             {
                 customRules = new
@@ -110,11 +116,10 @@ public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
         }
     }
 
-    private static async Task<string> GetAzureRestApiToken()
+    private static async Task<string> GetAzureRestApiToken(TokenCredential tokenCredential)
     {
-        var context = new DefaultAzureCredential();
-        var tokenRequestContext = new TokenRequestContext(new[] { "https://management.azure.com/.default" });
-        var accessToken = await context.GetTokenAsync(tokenRequestContext);
+        var requestContext = new TokenRequestContext(new[] { "https://management.azure.com/.default" });
+        var accessToken = await tokenCredential.GetTokenAsync(requestContext, new CancellationToken());
         return accessToken.Token;
     }
 }
