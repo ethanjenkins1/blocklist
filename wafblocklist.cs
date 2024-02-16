@@ -1,12 +1,15 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Azure.Identity;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
-using System.Text.Json; 
-using System.Text.RegularExpressions;
-using Azure.Identity;
+using Azure.Core;
 
 namespace MyFunctionApp
 {
@@ -16,7 +19,7 @@ namespace MyFunctionApp
         private static readonly string subscriptionId = Environment.GetEnvironmentVariable("AZURE_SUBSCRIPTION_ID") ?? throw new InvalidOperationException("Environment variable AZURE_SUBSCRIPTION_ID not set.");
         private static readonly string resourceGroupName = Environment.GetEnvironmentVariable("AZURE_RESOURCE_GROUP_NAME") ?? throw new InvalidOperationException("Environment variable AZURE_RESOURCE_GROUP_NAME not set.");
         private static readonly string policyName = Environment.GetEnvironmentVariable("WAF_POLICY_NAME") ?? throw new InvalidOperationException("Environment variable WAF_POLICY_NAME not set.");
-        private static readonly Regex ipPattern = new Regex(@"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b", RegexOptions.Compiled);
+        private static readonly Regex ipPattern = new Regex(@"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b", RegexOptions.Compiled);
 
         [Function("ProcessIPBlocklistAndUpdateFrontDoorWaf")]
         public static async Task Run([TimerTrigger("0 */5 * * * *")] TimerInfo myTimer, FunctionContext context)
@@ -29,17 +32,17 @@ namespace MyFunctionApp
                 "https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt"
             };
 
-            try 
+            try
             {
                 var allIps = await FetchIPsFromUrlsAsync(urls, logger);
                 if (allIps.Any())
                 {
                     await UpdateFrontDoorWafPolicyAsync(allIps, logger);
                 }
-            } 
+            }
             catch (Exception ex)
             {
-                logger.LogError("Error during IP processing: {error}", ex.Message);
+                logger.LogError($"Error during IP processing: {ex.Message}");
             }
         }
 
@@ -70,10 +73,8 @@ namespace MyFunctionApp
 
         private static async Task UpdateFrontDoorWafPolicyAsync(List<string> ips, ILogger logger)
         {
-            var tokenCredential = new DefaultAzureCredential();
-            httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await GetAzureRestApiTokenAsync(tokenCredential));
-
-            var requestUri = $"https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Network/frontDoorWebApplicationFirewallPolicies/{policyName}?api-version=2022-05-01"; 
+            var credential = new DefaultAzureCredential();
+            var requestUri = $"https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Network/frontDoorWebApplicationFirewallPolicies/{policyName}?api-version=2022-05-01";
 
             var policyUpdate = new
             {
@@ -94,7 +95,7 @@ namespace MyFunctionApp
                                     {
                                         matchVariable = "RemoteAddr",
                                         operatorProperty = "IPMatch",
-                                        negationConditon = false, 
+                                        negationCondition = false,
                                         matchValues = ips.ToArray()
                                     }
                                 }
@@ -104,33 +105,34 @@ namespace MyFunctionApp
                 }
             };
 
-            var jsonContent = JsonSerializer.Serialize(policyUpdate); 
+            var jsonContent = JsonSerializer.Serialize(policyUpdate);
             var content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
+
+            // Acquire a token for the Azure Management scope
+            var token = await credential.GetTokenAsync(new Azure.Core.TokenRequestContext(new[] { "https://management.azure.com/.default" }));
 
             try
             {
-                var response = await httpClient.PatchAsync(requestUri, content);
-                if (!response.IsSuccessStatusCode)
+                using (var request = new HttpRequestMessage(HttpMethod.Patch, requestUri))
                 {
-                    var error = await response.Content.ReadAsStringAsync();
-                    logger.LogError($"Failed to update Front Door WAF policy: {error}");
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+                    request.Content = content;
+                    var response = await httpClient.SendAsync(request);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        var error = await response.Content.ReadAsStringAsync();
+                        logger.LogError($"Failed to update Front Door WAF policy: {error}");
+                    }
+                    else
+                    {
+                        logger.LogInformation("Successfully updated Front Door WAF policy.");
+                    }
                 }
-                else
-                {
-                    logger.LogInformation("Successfully updated Front Door WAF policy.");
-                }
-            } 
+            }
             catch (HttpRequestException ex)
             {
                 logger.LogError($"Error updating WAF Policy: {ex.Message}");
             }
-        }
-
-        private static async Task<string> GetAzureRestApiTokenAsync(DefaultAzureCredential tokenCredential)
-        {
-            var requestContext = new TokenRequestContext(new[] { "https://management.azure.com/.default" });
-            var accessToken = await tokenCredential.GetTokenAsync(requestContext, new CancellationToken());
-            return accessToken.Token;
         }
     }
 }
