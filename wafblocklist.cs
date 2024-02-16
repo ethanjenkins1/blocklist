@@ -68,7 +68,7 @@ public static class ProcessIPBlocklistAndUpdateFrontDoorWaf
         var tokenCredential = new DefaultAzureCredential();
         httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", await GetAzureRestApiToken(tokenCredential));
 
-        var requestUri = $"https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Network/frontdoorwebapplicationfirewallpolicies/{policyName}?api-version=2023-05-01";
+        var requestUri = $"https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Cdn/cdnWebApplicationFirewallPolicies/{policyName}?api-version=2023-05-01";
 
         var policyUpdate = new
         {
